@@ -2041,7 +2041,7 @@
         if (obj.name === 'DeskWaterGlass') {
           deskGlassObj = obj;
           obj.scale.setScalar(0.95);
-          obj.position.set(-1.511, 0.689, 0.82);
+          obj.position.set(-1.536, 0.689, 0.82);
           clickTargets.push(obj);
         }
         if (obj.name.includes('DeskCigPack') || obj.name.includes('DeskAshtray')) { clickTargets.push(obj); }
@@ -2083,63 +2083,46 @@
             }
             geo.setIndex(keep);
           }
+          let pendingCoolerHandles = null;
           if ((obj.name.includes('WaterCooler') || (obj.parent && obj.parent.name === 'WaterCooler')) && obj.geometry && obj.geometry.index) {
-            // Substituir as pegas/torneiras recuadas por torneiras mais avançadas para a frente com buracos reais e pegas animadas
+            // Preservar 100% a parede traseira (q18 tem largura 0.30) e separar apenas as pegas originais (largura <= 0.025)
             const geo = obj.geometry;
             const wp = geo.attributes.position;
             const idx = geo.index;
             const keep = [];
+            const coldHandleTris = [];
+            const warmHandleTris = [];
+            const spoutVertsToAdvance = new Set();
             for (let i = 0; i < idx.count; i += 3) {
               const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
-              const xmid = (wp.getX(a) + wp.getX(b) + wp.getX(c)) / 3;
-              const ymid = (wp.getY(a) + wp.getY(b) + wp.getY(c)) / 3;
-              const zmin = Math.min(wp.getZ(a), wp.getZ(b), wp.getZ(c));
-              const zmax = Math.max(wp.getZ(a), wp.getZ(b), wp.getZ(c));
-              if (ymid >= 0.84 && ymid <= 0.99 && zmin >= -0.065 && zmax <= 0.055 && Math.abs(xmid) >= 0.035 && Math.abs(xmid) <= 0.09) {
+              const xmin = Math.min(wp.getX(a), wp.getX(b), wp.getX(c));
+              const xmax = Math.max(wp.getX(a), wp.getX(b), wp.getX(c));
+              const ymin = Math.min(wp.getY(a), wp.getY(b), wp.getY(c));
+              const ymax = Math.max(wp.getY(a), wp.getY(b), wp.getY(c));
+              const xw = xmax - xmin;
+              const xmid = (xmin + xmax) * 0.5;
+              // Pegas originais (q42..47 e q54..59: largura 0.020, y=[0.85, 0.93])
+              if (xw <= 0.026 && ymin >= 0.845 && ymax <= 0.935) {
+                if (xmid < 0) coldHandleTris.push(a, b, c);
+                else warmHandleTris.push(a, b, c);
                 continue;
+              }
+              // Corpo das torneiras originais (q36..41 e q48..53: largura 0.040, y=[0.89, 0.98])
+              if (xw <= 0.046 && ymin >= 0.885 && ymax <= 0.985) {
+                for (const vi of [a, b, c]) {
+                  if (wp.getZ(vi) > 0.01) spoutVertsToAdvance.add(vi);
+                }
               }
               keep.push(a, b, c);
             }
+            // Puxar a frente do corpo das torneiras originais mais para a frente (de z=0.02 para z=0.11)
+            const origPosClone = wp.clone();
+            for (const vi of spoutVertsToAdvance) {
+              wp.setZ(vi, 0.110);
+            }
+            wp.needsUpdate = true;
             geo.setIndex(keep);
-
-            const matSpoutBody = new THREE.MeshStandardMaterial({ color: 0xc8bfa8, roughness: 0.55 });
-            const matSpoutNozzle = new THREE.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.7 });
-            const matHoleDark = new THREE.MeshBasicMaterial({ color: 0x090808 });
-            const matLeverCold = new THREE.MeshStandardMaterial({ color: 0x2f7fb8, roughness: 0.45 });
-            const matLeverWarm = new THREE.MeshStandardMaterial({ color: 0xb83f32, roughness: 0.45 });
-
-            const buildCoolerTap = (lx, isColdTap) => {
-              const tap = new THREE.Group();
-              tap.position.set(lx, 0.945, 0);
-              // Corpo da torneira estendido bem para a frente sobre a base (de z = -0.06 até z = +0.132)
-              const body = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.054, 0.192), matSpoutBody);
-              body.position.set(0, 0, 0.036);
-              // Bico de saída vertical em z = +0.115 com furo escuro realista alinhado com o copo na base
-              const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.010, 0.030, 8), matSpoutNozzle);
-              spout.position.set(0, -0.032, 0.115);
-              const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.006, 8), matHoleDark);
-              hole.position.set(0, -0.045, 0.115);
-              // Pega frontal articulada com pivô para animação ao servir água
-              const leverPivot = new THREE.Group();
-              leverPivot.position.set(0, 0.018, 0.132);
-              const leverPaddle = new THREE.Mesh(
-                new THREE.BoxGeometry(0.028, 0.072, 0.016),
-                isColdTap ? matLeverCold : matLeverWarm
-              );
-              leverPaddle.position.set(0, -0.026, 0.006);
-              leverPivot.add(leverPaddle);
-              tap.add(body, spout, hole, leverPivot);
-              tap.traverse((o) => {
-                if (o.isMesh) {
-                  o.userData.consumableAction = 'cooler';
-                  clickTargets.push(o);
-                }
-              });
-              obj.add(tap);
-              return leverPivot;
-            };
-            coolerColdLever = buildCoolerTap(-0.06, true);
-            coolerWarmLever = buildCoolerTap(0.06, false);
+            pendingCoolerHandles = { origPosClone, coldHandleTris, warmHandleTris };
           }
           const isGlass = obj.name.includes('DeskWaterGlass');
           obj.castShadow = !isSky && !isGlass;
@@ -2175,6 +2158,32 @@
             obj.material = obj.material.map(applyProps);
           } else {
             obj.material = applyProps(obj.material);
+          }
+          if (pendingCoolerHandles) {
+            const { origPosClone, coldHandleTris, warmHandleTris } = pendingCoolerHandles;
+            const matHoleDark = new THREE.MeshBasicMaterial({ color: 0x090808 });
+            const makeLever = (tris, lx) => {
+              const lGeo = obj.geometry.clone();
+              lGeo.setAttribute('position', origPosClone.clone());
+              lGeo.setIndex(tris);
+              lGeo.translate(-lx, -0.925, -0.030);
+              const lMesh = new THREE.Mesh(lGeo, obj.material);
+              lMesh.castShadow = true;
+              lMesh.receiveShadow = true;
+              lMesh.userData.consumableAction = 'cooler';
+              clickTargets.push(lMesh);
+              const pivot = new THREE.Group();
+              pivot.position.set(lx, 0.925, 0.120);
+              pivot.add(lMesh);
+              obj.add(pivot);
+              // Buraco escuro real na parte inferior da torneira de onde sai o jato de água
+              const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.007, 0.012, 8), matHoleDark);
+              hole.position.set(lx, 0.887, 0.088);
+              obj.add(hole);
+              return pivot;
+            };
+            if (coldHandleTris.length) coolerColdLever = makeLever(coldHandleTris, -0.06);
+            if (warmHandleTris.length) coolerWarmLever = makeLever(warmHandleTris, 0.06);
           }
         }
       });
@@ -5565,9 +5574,9 @@
           if (deskGlassObj) deskGlassObj.visible = false;
           const isCold = activeAction.temp === 'cold';
           const tapZ = isCold ? 0.877 : 0.763;
-          const tapX = -1.511;
+          const tapX = -1.536;
           const trayY = 0.689; // Base da grelha do bebedouro (0.725 * 0.95)
-          const nozzleLocalY = 0.166; // Exatamente no buraco do bico (0.855m mundo - 0.689m base)
+          const nozzleLocalY = 0.154; // Exatamente no buraco do bico (0.843m mundo - 0.689m base)
           const activeLever = isCold ? coolerColdLever : coolerWarmLever;
           const idleLever = isCold ? coolerWarmLever : coolerColdLever;
           const pressAmt = (t < 1.85) ? smooth01(Math.min(t / 0.18, (1.85 - t) / 0.20, 1)) : 0;
