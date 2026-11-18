@@ -40,7 +40,7 @@
       ]
     },
     {
-      "source": "/(.*\\.(glb|png|jpg|jpeg|webp))",
+      "source": "/(.*).glb",
       "headers": [
         {
           "key": "Cache-Control",
