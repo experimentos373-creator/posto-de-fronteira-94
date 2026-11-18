@@ -1,0 +1,9 @@
+.vercel
+.env
+.env.*
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+.playwright-mcp/
