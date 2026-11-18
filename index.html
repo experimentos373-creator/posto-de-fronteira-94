@@ -1986,6 +1986,8 @@
     const interactiveDrawers = [];
     let deskLighterObj = null;
     let deskGlassObj = null;
+    let coolerColdLever = null;
+    let coolerWarmLever = null;
     function extractOpenDrawers(cabMesh, yBands) {
       if (!cabMesh || !cabMesh.geometry || !cabMesh.geometry.index) return;
       const geo = cabMesh.geometry;
@@ -2031,6 +2033,9 @@
         if (obj.isLight) obj.visible = false;
         if (obj.name === 'VisitorChair') obj.position.x -= 0.26;
         if (obj.name === 'ExecutiveChair') { obj.position.x += 0.06; obj.rotation.y = 0; }
+        if (obj.name === 'WaterCooler') {
+          obj.scale.setScalar(0.90);
+        }
         if (obj.name.includes('DeskCoffeeMug')) { deskMugObjs.push(obj); clickTargets.push(obj); }
         if (obj.name === 'DeskLighter') { deskLighterObj = obj; clickTargets.push(obj); }
         if (obj.name === 'DeskWaterGlass') { deskGlassObj = obj; clickTargets.push(obj); }
@@ -2072,6 +2077,64 @@
               keep.push(a, b, c);
             }
             geo.setIndex(keep);
+          }
+          if ((obj.name.includes('WaterCooler') || (obj.parent && obj.parent.name === 'WaterCooler')) && obj.geometry && obj.geometry.index) {
+            // Substituir as pegas/torneiras recuadas por torneiras mais avançadas para a frente com buracos reais e pegas animadas
+            const geo = obj.geometry;
+            const wp = geo.attributes.position;
+            const idx = geo.index;
+            const keep = [];
+            for (let i = 0; i < idx.count; i += 3) {
+              const a = idx.getX(i), b = idx.getX(i + 1), c = idx.getX(i + 2);
+              const xmid = (wp.getX(a) + wp.getX(b) + wp.getX(c)) / 3;
+              const ymid = (wp.getY(a) + wp.getY(b) + wp.getY(c)) / 3;
+              const zmin = Math.min(wp.getZ(a), wp.getZ(b), wp.getZ(c));
+              const zmax = Math.max(wp.getZ(a), wp.getZ(b), wp.getZ(c));
+              if (ymid >= 0.84 && ymid <= 0.99 && zmin >= -0.065 && zmax <= 0.055 && Math.abs(xmid) >= 0.035 && Math.abs(xmid) <= 0.09) {
+                continue;
+              }
+              keep.push(a, b, c);
+            }
+            geo.setIndex(keep);
+
+            const matSpoutBody = new THREE.MeshStandardMaterial({ color: 0xc8bfa8, roughness: 0.55 });
+            const matSpoutNozzle = new THREE.MeshStandardMaterial({ color: 0x2a2724, roughness: 0.7 });
+            const matHoleDark = new THREE.MeshBasicMaterial({ color: 0x090808 });
+            const matLeverCold = new THREE.MeshStandardMaterial({ color: 0x2f7fb8, roughness: 0.45 });
+            const matLeverWarm = new THREE.MeshStandardMaterial({ color: 0xb83f32, roughness: 0.45 });
+
+            const buildCoolerTap = (lx, isColdTap) => {
+              const tap = new THREE.Group();
+              tap.position.set(lx, 0.945, 0);
+              // Corpo da torneira estendido bem mais para a frente (até z = +0.088)
+              const body = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.054, 0.148), matSpoutBody);
+              body.position.set(0, 0, 0.014);
+              // Bico de saída vertical em z = +0.070 com furo escuro realista
+              const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.010, 0.030, 8), matSpoutNozzle);
+              spout.position.set(0, -0.032, 0.070);
+              const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.006, 8), matHoleDark);
+              hole.position.set(0, -0.045, 0.070);
+              // Pega frontal articulada com pivô para animação ao servir água
+              const leverPivot = new THREE.Group();
+              leverPivot.position.set(0, 0.018, 0.088);
+              const leverPaddle = new THREE.Mesh(
+                new THREE.BoxGeometry(0.028, 0.072, 0.016),
+                isColdTap ? matLeverCold : matLeverWarm
+              );
+              leverPaddle.position.set(0, -0.026, 0.006);
+              leverPivot.add(leverPaddle);
+              tap.add(body, spout, hole, leverPivot);
+              tap.traverse((o) => {
+                if (o.isMesh) {
+                  o.userData.consumableAction = 'cooler';
+                  clickTargets.push(o);
+                }
+              });
+              obj.add(tap);
+              return leverPivot;
+            };
+            coolerColdLever = buildCoolerTap(-0.06, true);
+            coolerWarmLever = buildCoolerTap(0.06, false);
           }
           const isGlass = obj.name.includes('DeskWaterGlass');
           obj.castShadow = !isSky && !isGlass;
@@ -4083,7 +4146,7 @@
     );
     coolerWaterFill.position.y = 0.044;
     const coolerStream = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.004, 0.003, 0.165, 6),
+      new THREE.CylinderGeometry(0.0038, 0.0032, 1.0, 8),
       new THREE.MeshBasicMaterial({ color: 0x82d4ff, transparent: true, opacity: 0.85 })
     );
     coolerStream.position.y = 0.088;
@@ -5496,10 +5559,18 @@
         } else if (activeAction.type === 'water') {
           if (deskGlassObj) deskGlassObj.visible = false;
           const isCold = activeAction.temp === 'cold';
-          const tapZ = isCold ? 0.88 : 0.76;
+          const tapZ = isCold ? 0.874 : 0.766;
+          const tapX = -1.557;
+          const trayY = 0.648;
+          const nozzleLocalY = 0.164; // exatamente no buraco do bico (0.812m mundo - 0.648m bandeja)
+          const activeLever = isCold ? coolerColdLever : coolerWarmLever;
+          const idleLever = isCold ? coolerWarmLever : coolerColdLever;
+          const pressAmt = (t < 1.85) ? smooth01(Math.min(t / 0.18, (1.85 - t) / 0.20, 1)) : 0;
+          if (activeLever) activeLever.rotation.x += (-0.58 * pressAmt - activeLever.rotation.x) * Math.min(1, dt * 16);
+          if (idleLever) idleLever.rotation.x += (0 - idleLever.rotation.x) * Math.min(1, dt * 14);
           if (t < 2.10) {
             if (cameraMode === 'first') {
-              const dx = -1.48 - player.group.position.x;
+              const dx = tapX - player.group.position.x;
               const dz = tapZ - player.group.position.z;
               const targetYaw = Math.atan2(-dx, -dz);
               let dYaw = targetYaw - fpYaw;
@@ -5507,20 +5578,24 @@
               while (dYaw < -Math.PI) dYaw += Math.PI * 2;
               fpYaw += dYaw * Math.min(1, dt * 6.5);
               const dist = Math.hypot(dx, dz);
-              const targetPitch = Math.atan2(0.80 - 1.27, dist);
+              const targetPitch = Math.atan2(0.73 - 1.27, dist);
               fpPitch += (targetPitch - fpPitch) * Math.min(1, dt * 6.5);
             }
             coolerFillGroup.visible = true;
-            coolerFillGroup.position.set(-1.48, 0.725, tapZ);
+            coolerFillGroup.position.set(tapX, trayY, tapZ);
             coolerWaterFill.material.color.setHex(isCold ? 0x5ca4cf : 0xa6d8f5);
             coolerStream.material.color.setHex(isCold ? 0x82d4ff : 0xccecfc);
             const fillRatio = smooth01(t / 1.80);
             coolerWaterFill.scale.y = Math.max(0.05, fillRatio);
             coolerWaterFill.position.y = 0.010 + 0.034 * fillRatio;
+            const waterTopY = 0.014 + 0.068 * fillRatio;
+            const streamLen = Math.max(0.01, nozzleLocalY - waterTopY);
+            const pulse = 0.88 + 0.20 * Math.sin(totalTime * 28);
             coolerStream.visible = t < 1.85;
-            coolerStream.scale.x = 0.85 + 0.25 * Math.sin(totalTime * 28);
+            coolerStream.scale.set(pulse, streamLen, pulse);
+            coolerStream.position.y = (nozzleLocalY + waterTopY) * 0.5;
             coolerRipple.visible = t < 1.88;
-            coolerRipple.position.y = 0.012 + 0.070 * fillRatio;
+            coolerRipple.position.y = waterTopY;
             const ripS = 0.7 + ((totalTime * 3.5) % 0.6);
             coolerRipple.scale.set(ripS, ripS, 1);
             coolerWarmVapor.visible = !isCold;
@@ -5586,6 +5661,9 @@
           }
           activeAction = null;
         }
+      } else {
+        if (coolerColdLever) coolerColdLever.rotation.x += (0 - coolerColdLever.rotation.x) * Math.min(1, dt * 12);
+        if (coolerWarmLever) coolerWarmLever.rotation.x += (0 - coolerWarmLever.rotation.x) * Math.min(1, dt * 12);
       }
 
       camAnimPitch += (targetPitchOff - camAnimPitch) * Math.min(1, dt * 8);
