@@ -2034,11 +2034,16 @@
         if (obj.name === 'VisitorChair') obj.position.x -= 0.26;
         if (obj.name === 'ExecutiveChair') { obj.position.x += 0.06; obj.rotation.y = 0; }
         if (obj.name === 'WaterCooler') {
-          obj.scale.setScalar(0.90);
+          obj.scale.setScalar(0.95);
         }
         if (obj.name.includes('DeskCoffeeMug')) { deskMugObjs.push(obj); clickTargets.push(obj); }
         if (obj.name === 'DeskLighter') { deskLighterObj = obj; clickTargets.push(obj); }
-        if (obj.name === 'DeskWaterGlass') { deskGlassObj = obj; clickTargets.push(obj); }
+        if (obj.name === 'DeskWaterGlass') {
+          deskGlassObj = obj;
+          obj.scale.setScalar(0.95);
+          obj.position.set(-1.511, 0.689, 0.82);
+          clickTargets.push(obj);
+        }
         if (obj.name.includes('DeskCigPack') || obj.name.includes('DeskAshtray')) { clickTargets.push(obj); }
         if (obj.isMesh) {
           const isSky = obj.name.includes('SunsetBackdrop');
@@ -2106,17 +2111,17 @@
             const buildCoolerTap = (lx, isColdTap) => {
               const tap = new THREE.Group();
               tap.position.set(lx, 0.945, 0);
-              // Corpo da torneira estendido bem mais para a frente (até z = +0.088)
-              const body = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.054, 0.148), matSpoutBody);
-              body.position.set(0, 0, 0.014);
-              // Bico de saída vertical em z = +0.070 com furo escuro realista
+              // Corpo da torneira estendido bem para a frente sobre a base (de z = -0.06 até z = +0.132)
+              const body = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.054, 0.192), matSpoutBody);
+              body.position.set(0, 0, 0.036);
+              // Bico de saída vertical em z = +0.115 com furo escuro realista alinhado com o copo na base
               const spout = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.010, 0.030, 8), matSpoutNozzle);
-              spout.position.set(0, -0.032, 0.070);
-              const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.006, 8), matHoleDark);
-              hole.position.set(0, -0.045, 0.070);
+              spout.position.set(0, -0.032, 0.115);
+              const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.0065, 0.0065, 0.006, 8), matHoleDark);
+              hole.position.set(0, -0.045, 0.115);
               // Pega frontal articulada com pivô para animação ao servir água
               const leverPivot = new THREE.Group();
-              leverPivot.position.set(0, 0.018, 0.088);
+              leverPivot.position.set(0, 0.018, 0.132);
               const leverPaddle = new THREE.Mesh(
                 new THREE.BoxGeometry(0.028, 0.072, 0.016),
                 isColdTap ? matLeverCold : matLeverWarm
@@ -5559,10 +5564,10 @@
         } else if (activeAction.type === 'water') {
           if (deskGlassObj) deskGlassObj.visible = false;
           const isCold = activeAction.temp === 'cold';
-          const tapZ = isCold ? 0.874 : 0.766;
-          const tapX = -1.557;
-          const trayY = 0.648;
-          const nozzleLocalY = 0.164; // exatamente no buraco do bico (0.812m mundo - 0.648m bandeja)
+          const tapZ = isCold ? 0.877 : 0.763;
+          const tapX = -1.511;
+          const trayY = 0.689; // Base da grelha do bebedouro (0.725 * 0.95)
+          const nozzleLocalY = 0.166; // Exatamente no buraco do bico (0.855m mundo - 0.689m base)
           const activeLever = isCold ? coolerColdLever : coolerWarmLever;
           const idleLever = isCold ? coolerWarmLever : coolerColdLever;
           const pressAmt = (t < 1.85) ? smooth01(Math.min(t / 0.18, (1.85 - t) / 0.20, 1)) : 0;
